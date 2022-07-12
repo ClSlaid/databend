@@ -260,10 +260,8 @@ pub fn query_route() -> Route {
 }
 
 fn query_id_not_found(query_id: String) -> PoemError {
-    PoemError::from_string(
-        format!("query id not found {}", query_id),
-        StatusCode::NOT_FOUND,
-    )
+    let msg = json!({"query id": query_id, "msg": "query id not found"}).to_string();
+    PoemError::from_string(msg, StatusCode::NOT_FOUND)
 }
 
 #[derive(Deserialize)]
