@@ -12,6 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+pub mod input_format_avro;
 pub mod input_format_csv;
 pub mod input_format_ndjson;
 pub mod input_format_parquet;

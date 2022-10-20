@@ -147,6 +147,8 @@ build_exceptions! {
     UnknownFragmentExchange(1082),
     InternalError(1083),
 
+    AvroError(1084),
+
     // Tenant error codes.
     TenantIsEmpty(1101),
     IndexOutOfBounds(1102),

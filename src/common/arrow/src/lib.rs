@@ -14,11 +14,14 @@
 
 #![deny(unused_crate_dependencies)]
 
+mod avro_read;
+mod avro_write;
 mod parquet_read;
 mod parquet_write;
 
 pub use arrow;
 pub use arrow_format;
+pub use avro;
 pub use parquet2 as parquet;
 pub use parquet_read::read_columns_async;
 pub use parquet_read::read_columns_many_async;

@@ -172,6 +172,7 @@ checksum = "467e88c67d518f9992bb1f6c8faa202eaf93b0ce244889d241c9c44d0df0ab46"
 dependencies = [
  "ahash 0.7.6",
  "arrow-format",
+ "avro-schema",
  "base64",
  "bytemuck",
  "chrono",
@@ -471,6 +472,19 @@ name = "autocfg"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
+
+[[package]]
+name = "avro-schema"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5281855b39aba9684d2f47bf96983fbfd8f1725f12fabb0513a8ab879647bbd"
+dependencies = [
+ "async-stream",
+ "fallible-streaming-iterator",
+ "futures",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "axum"
@@ -1172,6 +1186,7 @@ version = "0.1.0"
 dependencies = [
  "arrow-format",
  "arrow2",
+ "avro-schema",
  "futures",
  "parquet2",
 ]
@@ -8143,7 +8158,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if",
- "rand 0.7.3",
+ "rand 0.8.5",
  "static_assertions",
 ]
 
