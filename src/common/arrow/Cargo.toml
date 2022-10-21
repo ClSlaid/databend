@@ -17,6 +17,7 @@ arrow-default = [
     "arrow/io_csv",
     "arrow/io_parquet",
     "arrow/io_avro_async",
+    "arrow/io_avro",
     "arrow/io_json",
     "arrow/io_flight",
     "arrow/compute_filter",

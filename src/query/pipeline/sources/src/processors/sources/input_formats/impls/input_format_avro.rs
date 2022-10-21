@@ -12,18 +12,35 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::any::Any;
+use std::io::Read;
+use std::io::Seek;
 use std::sync::Arc;
 
+use common_arrow::arrow::array::Array;
+use common_arrow::arrow::chunk::Chunk as ArrowChunk;
+use common_arrow::arrow::datatypes::Field;
+use common_arrow::arrow::io::avro::read;
+use common_arrow::arrow::io::avro::read::deserialize;
+use common_arrow::arrow::io::avro::read::Reader as AvroReader;
 use common_arrow::avro::file::CompressedBlock;
 use common_arrow::avro::file::Compression;
+use common_arrow::avro::file::FileMetadata;
+use common_arrow::avro::read::block_iterator;
+use common_arrow::avro::read::fallible_streaming_iterator::FallibleStreamingIterator;
+use common_arrow::avro::read::BlockStreamingIterator;
 use common_arrow::avro::read_async::block_stream;
 use common_arrow::avro::read_async::read_metadata;
+use common_arrow::avro::schema::Field as AvroField;
 use common_arrow::avro::schema::Schema;
 use common_datavalues::DataSchemaRef;
+use common_exception::ErrorCode;
 use common_exception::Result;
 use common_io::prelude::FormatSettings;
 use common_pipeline_core::Pipeline;
 use common_settings::Settings;
+use futures::AsyncSeek;
+use futures::AsyncSeekExt;
 use futures::Stream;
 use futures::StreamExt;
 use opendal::io_util::CompressAlgorithm;
@@ -79,33 +96,30 @@ impl InputFormat for InputFormatAvro {
             let mut blks = vec![];
             while let Some(block_res) = blocks.next().await {
                 let block = block_res?;
-                blks.push(block);
+                blks.push((offset, block));
+                offset = reader.stream_position().await;
             }
 
             let fields = &file_meta.record.fields;
             let read_file_meta = Arc::new(FileMeta { fields });
+            let compress_alg = file_meta.compression.map(|c| match c {
+                Compression::Snappy => unimplemented!(),
+                Compression::Deflate => CompressAlgorithm::Deflate,
+            });
+
             let file_info = Arc::new(FileInfo {
                 path: path.clone(),
                 size,
-                num_splits: row_groups.len(),
-                compress_alg: file_meta.compression.map(|c| match c {
-                    Compression::Snappy => unimplemented!(),
-                    Compression::Deflate => CompressAlgorithm::Deflate,
-                }),
+                num_splits: blks.len(),
+                compress_alg,
             });
 
             let num_file_splits = blks.len();
-            for (idx, block) in blks.into_iter().enumerate() {
+            for (idx, (offset, block)) in blks.into_iter().enumerate() {
                 if block.number_of_rows != 0 {
                     let size_in_bytes = block.data.len();
-                    let block_meta = BlockMetadata {
-                        rows: block.number_of_rows,
-                        size_in_bytes,
-                    };
-                    let meta = Arc::new(SplitMeta {
-                        file: read_file_meta.clone(),
-                        meta: block_meta,
-                    });
+                    let block_meta = Arc::new(file_meta);
+                    let meta = Arc::new(SplitMeta { meta: block_meta });
                     let info = Arc::new(SplitInfo {
                         file: file_info.clone(),
                         seq_in_file: idx,
@@ -115,7 +129,6 @@ impl InputFormat for InputFormatAvro {
                         format_info: Some(meta),
                     });
                     infos.push(info);
-                    offset += size;
                 }
             }
         }
@@ -135,9 +148,9 @@ pub struct AvroFormatPipe;
 
 #[async_trait::async_trait]
 impl InputFormatPipe for AvroFormatPipe {
-    type SplitMeta = SplitMeta;
+    type SplitMeta = FileMetadata;
     type ReadBatch = Vec<u8>;
-    type RowBatch = CompressedBlock;
+    type RowBatch = ArrowChunk<Box<dyn Array>>;
     type AligningState = AligningState;
     type BlockBuilder = AvroBlockBuilder;
 
@@ -149,7 +162,7 @@ impl InputFormatPipe for AvroFormatPipe {
         let op = ctx.source.get_operator()?;
         let obj = op.object(&split_info.file.path);
         let mut reader = obj.seekable_reader(..(split_info.file.size as u64));
-        BlockInMemory::read_async(&mut reader, meta.meta.clone(), meta.file.fields.clone()).await
+        read_block_to_chunks(&mut reader, meta.meta.clone(), meta.file.fields.clone())
     }
 }
 
@@ -158,8 +171,7 @@ pub struct FileMeta {
 }
 
 pub struct SplitMeta {
-    pub file: Arc<FileMeta>,
-    pub meta: BlockMetadata,
+    pub meta: Arc<FileMetadata>,
 }
 
 impl DynData for SplitMeta {
@@ -168,10 +180,35 @@ impl DynData for SplitMeta {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct BlockMetadata {
-    rows: usize,
-    size_in_bytes: usize,
+/// use it if the header is read completely
+fn read_block_to_chunks<R: Read + Seek>(
+    reader: &mut R,
+    meta: FileMetadata,
+    fields: Arc<Vec<Field>>,
+) -> Result<Vec<ArrowChunk<Box<dyn Array>>>> {
+    let field_names = fields.iter().map(|x| x.name.as_str()).collect::<Vec<_>>();
+    let block_iter: BlockStreamingIterator<R> =
+        block_iterator(reader, meta.compression.clone(), meta.marker);
+
+    let schema = read::infer_schema(&meta.record)?;
+    let mut projections = vec![];
+    let mut field_idx = 0;
+    for field in schema.fields.iter() {
+        if field.name == field_names[field_idx] {
+            field_idx += 1;
+            projections.push(true);
+        } else {
+            projections.push(false);
+        }
+    }
+    let mut chunks = vec![];
+    let r = AvroReader::new(reader, meta, schema.fields, Some(projections));
+    // decompressed blocks
+    for maybe_chrunks in r {
+        let chunk = maybe_chrunks?;
+        chunks.push(chunk);
+    }
+    Ok(chunks)
 }
 
 pub struct AligningState {}
